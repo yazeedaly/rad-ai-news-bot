@@ -4,7 +4,6 @@ import asyncio
 from ..scrapers.auntminnie_scraper import AuntMinnieScraper
 from ..scrapers.beckers_scraper import BeckersScraper
 from ..scrapers.stat_scraper import StatScraper
-from ..scrapers.modern_healthcare_scraper import ModernHealthcareScraper
 from ..filters.content_filter import ContentFilter
 
 class NewsAggregator:
@@ -13,8 +12,7 @@ class NewsAggregator:
         self.scrapers = [
             AuntMinnieScraper(),
             BeckersScraper(),
-            StatScraper(),
-            ModernHealthcareScraper()
+            StatScraper()
         ]
         self.content_filter = ContentFilter()
         print(f"Initialized {len(self.scrapers)} scrapers")
@@ -39,7 +37,15 @@ class NewsAggregator:
                 print(f'Error gathering news from {scraper.__class__.__name__}: {str(e)}')
 
         print(f"Total articles gathered: {len(all_articles)}")
-        return self._process_articles(all_articles)
+
+        # Process and categorize articles
+        categorized_articles = self._process_articles(all_articles)
+        
+        # Ensure both categories exist in the output
+        return {
+            'radiology': categorized_articles.get('radiology', []),
+            'healthcare': categorized_articles.get('healthcare', [])
+        }
 
     def _process_articles(self, articles: List[Dict]) -> Dict[str, List[Dict]]:
         """Process and categorize articles"""
