@@ -7,18 +7,34 @@ from ..scrapers.stat_scraper import StatScraper
 from ..scrapers.modern_healthcare_scraper import ModernHealthcareScraper
 from ..scrapers.healthcare_it_news_scraper import HealthcareITNewsScraper
 from ..scrapers.rsna_ai_scraper import RSNAAIScraper
+from ..scrapers.acr_scraper import ACRScraper
 from ..filters.content_filter import ContentFilter
 
 class NewsAggregator:
     def __init__(self):
         print("Initializing NewsAggregator...")
+        # Define source priorities
+        self.source_priorities = {
+            'RSNA AI': 1,          # Highest priority - academic research
+            'ACR News': 2,          # Professional organization news
+            'ACR AI-LAB': 2,        # ACR AI initiatives
+            'ACR AI Central': 2,    # ACR AI policy/advocacy
+            'AuntMinnie': 3,        # Radiology industry news
+            'STAT': 4,              # General healthcare news
+            'ModernHealthcare': 4,
+            'HealthcareITNews': 4,
+            'Beckers': 4
+        }
+        
+        # Initialize scrapers in priority order
         self.scrapers = [
-            RSNAAIScraper(),  # Place RSNA first as it's most relevant
-            AuntMinnieScraper(),
-            BeckersScraper(),
-            StatScraper(),
+            RSNAAIScraper(),    # Priority 1
+            ACRScraper(),       # Priority 2
+            AuntMinnieScraper(), # Priority 3
+            StatScraper(),       # Priority 4
             ModernHealthcareScraper(),
-            HealthcareITNewsScraper()
+            HealthcareITNewsScraper(),
+            BeckersScraper()
         ]
         self.content_filter = ContentFilter()
         print(f"Initialized {len(self.scrapers)} scrapers")
@@ -40,19 +56,7 @@ class NewsAggregator:
                 print(f"Error during gathering: {str(result)}")
 
         print(f"Total articles gathered: {len(all_articles)}")
-        
-        # Process and categorize articles
-        categorized = self._process_articles(all_articles)
-        
-        # Ensure RSNA articles get priority in radiology section
-        if categorized['radiology']:
-            rsna_articles = [a for a in categorized['radiology'] if a.get('source') == 'RSNA AI']
-            other_articles = [a for a in categorized['radiology'] if a.get('source') != 'RSNA AI']
-            
-            # Combine with RSNA articles first, maintaining limit of 5 total
-            categorized['radiology'] = (rsna_articles + other_articles)[:5]
-        
-        return categorized
+        return self._process_articles(all_articles)
 
     async def _gather_from_scraper(self, scraper) -> List[Dict]:
         """Gather articles from a single scraper with error handling"""
@@ -60,10 +64,12 @@ class NewsAggregator:
             print(f"Fetching articles from {scraper.__class__.__name__}...")
             articles = await scraper.get_articles()
             
-            # Add source information to each article
+            # Add source information and priority to each article
             for article in articles:
-                if 'source' not in article:  # Don't override if already set
-                    article['source'] = scraper.__class__.__name__.replace('Scraper', '')
+                source = scraper.__class__.__name__.replace('Scraper', '')
+                if 'source' not in article:
+                    article['source'] = source
+                article['priority'] = self.source_priorities.get(article['source'], 5)
             
             print(f"Found {len(articles)} articles from {scraper.__class__.__name__}")
             return articles
@@ -75,7 +81,7 @@ class NewsAggregator:
             return []
 
     def _process_articles(self, articles: List[Dict]) -> Dict[str, List[Dict]]:
-        """Process and categorize articles"""
+        """Process and categorize articles with priority weighting"""
         rad_articles = []
         healthcare_articles = []
         
@@ -85,13 +91,19 @@ class NewsAggregator:
                 text = f"{article['title']} {article.get('summary', '')}"
                 relevance = self.content_filter.is_relevant(text)
                 
-                # RSNA AI articles automatically go to radiology section
-                if article.get('source') == 'RSNA AI':
-                    article['relevance_scores'] = self.content_filter.calculate_relevance_score(text)
+                # Calculate base relevance scores
+                article['relevance_scores'] = self.content_filter.calculate_relevance_score(text)
+                
+                # Apply priority weighting
+                priority_multiplier = self._get_priority_multiplier(article['priority'])
+                for key in article['relevance_scores']:
+                    article['relevance_scores'][key] *= priority_multiplier
+                
+                # Categorize articles
+                if self._is_priority_source(article['source']):
+                    # Priority sources automatically go to radiology section
                     rad_articles.append(article)
                 elif relevance['is_relevant']:
-                    article['relevance_scores'] = self.content_filter.calculate_relevance_score(text)
-                    
                     if relevance['is_radiology']:
                         rad_articles.append(article)
                     elif relevance['is_general_healthcare']:
@@ -101,8 +113,11 @@ class NewsAggregator:
                 print(f"Error processing article: {str(e)}")
                 print(f"Problematic article: {article}")
         
-        # Sort articles by relevance score
-        rad_articles.sort(key=lambda x: x['relevance_scores']['combined'], reverse=True)
+        # Sort articles by weighted relevance score
+        rad_articles.sort(key=lambda x: (
+            x['priority'],  # First sort by priority (lower number = higher priority)
+            x['relevance_scores']['combined']  # Then by relevance score
+        ))
         healthcare_articles.sort(key=lambda x: x['relevance_scores']['combined'], reverse=True)
         
         print(f"Found {len(rad_articles)} radiology AI articles")
@@ -112,3 +127,19 @@ class NewsAggregator:
             'radiology': rad_articles[:5],    # Top 5 radiology AI articles
             'healthcare': healthcare_articles[:5]  # Top 5 general healthcare AI articles
         }
+
+    def _is_priority_source(self, source: str) -> bool:
+        """Check if source is a priority radiology source"""
+        return source in ['RSNA AI', 'ACR News', 'ACR AI-LAB', 'ACR AI Central']
+
+    def _get_priority_multiplier(self, priority: int) -> float:
+        """Get relevance score multiplier based on source priority"""
+        # Priority 1 (RSNA) gets highest boost, decreasing for lower priorities
+        multipliers = {
+            1: 1.5,  # RSNA gets 50% boost
+            2: 1.3,  # ACR gets 30% boost
+            3: 1.2,  # AuntMinnie gets 20% boost
+            4: 1.0,  # No boost for general sources
+            5: 0.9   # Slight penalty for unknown sources
+        }
+        return multipliers.get(priority, 1.0)
