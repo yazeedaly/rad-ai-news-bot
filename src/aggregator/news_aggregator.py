@@ -6,12 +6,14 @@ from ..scrapers.beckers_scraper import BeckersScraper
 from ..scrapers.stat_scraper import StatScraper
 from ..scrapers.modern_healthcare_scraper import ModernHealthcareScraper
 from ..scrapers.healthcare_it_news_scraper import HealthcareITNewsScraper
+from ..scrapers.rsna_ai_scraper import RSNAAIScraper
 from ..filters.content_filter import ContentFilter
 
 class NewsAggregator:
     def __init__(self):
         print("Initializing NewsAggregator...")
         self.scrapers = [
+            RSNAAIScraper(),  # Place RSNA first as it's most relevant
             AuntMinnieScraper(),
             BeckersScraper(),
             StatScraper(),
@@ -38,7 +40,19 @@ class NewsAggregator:
                 print(f"Error during gathering: {str(result)}")
 
         print(f"Total articles gathered: {len(all_articles)}")
-        return self._process_articles(all_articles)
+        
+        # Process and categorize articles
+        categorized = self._process_articles(all_articles)
+        
+        # Ensure RSNA articles get priority in radiology section
+        if categorized['radiology']:
+            rsna_articles = [a for a in categorized['radiology'] if a.get('source') == 'RSNA AI']
+            other_articles = [a for a in categorized['radiology'] if a.get('source') != 'RSNA AI']
+            
+            # Combine with RSNA articles first, maintaining limit of 5 total
+            categorized['radiology'] = (rsna_articles + other_articles)[:5]
+        
+        return categorized
 
     async def _gather_from_scraper(self, scraper) -> List[Dict]:
         """Gather articles from a single scraper with error handling"""
@@ -48,7 +62,8 @@ class NewsAggregator:
             
             # Add source information to each article
             for article in articles:
-                article['source'] = scraper.__class__.__name__.replace('Scraper', '')
+                if 'source' not in article:  # Don't override if already set
+                    article['source'] = scraper.__class__.__name__.replace('Scraper', '')
             
             print(f"Found {len(articles)} articles from {scraper.__class__.__name__}")
             return articles
@@ -70,7 +85,11 @@ class NewsAggregator:
                 text = f"{article['title']} {article.get('summary', '')}"
                 relevance = self.content_filter.is_relevant(text)
                 
-                if relevance['is_relevant']:
+                # RSNA AI articles automatically go to radiology section
+                if article.get('source') == 'RSNA AI':
+                    article['relevance_scores'] = self.content_filter.calculate_relevance_score(text)
+                    rad_articles.append(article)
+                elif relevance['is_relevant']:
                     article['relevance_scores'] = self.content_filter.calculate_relevance_score(text)
                     
                     if relevance['is_radiology']:
