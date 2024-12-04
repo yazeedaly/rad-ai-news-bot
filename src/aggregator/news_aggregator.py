@@ -3,6 +3,8 @@ from datetime import datetime
 import asyncio
 from ..scrapers.auntminnie_scraper import AuntMinnieScraper
 from ..scrapers.beckers_scraper import BeckersScraper
+from ..scrapers.stat_scraper import StatScraper
+from ..scrapers.modern_healthcare_scraper import ModernHealthcareScraper
 from ..filters.content_filter import ContentFilter
 
 class NewsAggregator:
@@ -10,13 +12,15 @@ class NewsAggregator:
         print("Initializing NewsAggregator...")
         self.scrapers = [
             AuntMinnieScraper(),
-            BeckersScraper()
+            BeckersScraper(),
+            StatScraper(),
+            ModernHealthcareScraper()
         ]
         self.content_filter = ContentFilter()
         print(f"Initialized {len(self.scrapers)} scrapers")
 
     async def gather_news(self) -> Dict[str, List[Dict]]:
-        """Gather news from all sources"""
+        """Gather and categorize healthcare AI news"""
         print("Starting news gathering process...")
         all_articles = []
         
@@ -24,84 +28,48 @@ class NewsAggregator:
         for scraper in self.scrapers:
             try:
                 print(f"Fetching articles from {scraper.__class__.__name__}...")
-                articles = await scraper.get_articles()  # Make get_articles async
-                print(f"Found {len(articles)} articles from {scraper.__class__.__name__}")
+                articles = await scraper.get_articles()
                 
                 for article in articles:
-                    # Add source information
                     article['source'] = scraper.__class__.__name__.replace('Scraper', '')
                 all_articles.extend(articles)
                 
+                print(f"Found {len(articles)} articles from {scraper.__class__.__name__}")
             except Exception as e:
                 print(f'Error gathering news from {scraper.__class__.__name__}: {str(e)}')
-                print(f'Error type: {type(e).__name__}')
-                import traceback
-                print(traceback.format_exc())
 
         print(f"Total articles gathered: {len(all_articles)}")
+        return self._process_articles(all_articles)
 
-        # Filter and sort articles
-        filtered_articles = self._filter_articles(all_articles)
-        print(f"Articles after filtering: {len(filtered_articles)}")
-        
-        sorted_articles = self._sort_articles(filtered_articles)
-        print(f"Articles after sorting: {len(sorted_articles)}")
-
-        # Categorize articles
-        categorized = self._categorize_articles(sorted_articles)
-        print(f"Final article counts - Applications: {len(categorized['applications'])}, Research: {len(categorized['research'])}")
-        
-        return categorized
-
-    def _filter_articles(self, articles: List[Dict]) -> List[Dict]:
-        """Filter articles based on relevance"""
-        filtered = []
-        print(f"Filtering {len(articles)} articles...")
+    def _process_articles(self, articles: List[Dict]) -> Dict[str, List[Dict]]:
+        """Process and categorize articles"""
+        rad_articles = []
+        healthcare_articles = []
         
         for article in articles:
             try:
-                text = f"{article.get('title', '')} {article.get('summary', '')}"
-                if self.content_filter.is_relevant(text):
-                    # Add relevance scores to article metadata
+                text = f"{article['title']} {article.get('summary', '')}"
+                relevance = self.content_filter.is_relevant(text)
+                
+                if relevance['is_relevant']:
                     article['relevance_scores'] = self.content_filter.calculate_relevance_score(text)
-                    filtered.append(article)
+                    
+                    if relevance['is_radiology']:
+                        rad_articles.append(article)
+                    elif relevance['is_general_healthcare']:
+                        healthcare_articles.append(article)
+                        
             except Exception as e:
-                print(f"Error filtering article: {str(e)}")
-                print(f"Article data: {article}")
+                print(f"Error processing article: {str(e)}")
         
-        return filtered
-
-    def _sort_articles(self, articles: List[Dict]) -> List[Dict]:
-        """Sort articles by relevance and date"""
-        try:
-            return sorted(
-                articles,
-                key=lambda x: (x['relevance_scores']['combined'], 
-                              x.get('published_date', datetime.min)),
-                reverse=True
-            )
-        except Exception as e:
-            print(f"Error sorting articles: {str(e)}")
-            return articles
-
-    def _categorize_articles(self, articles: List[Dict]) -> Dict[str, List[Dict]]:
-        """Categorize articles into applications and research"""
-        applications = []
-        research = []
-
-        for article in articles:
-            try:
-                scores = article['relevance_scores']
-                # Categorize based on keyword presence and scores
-                if scores['clinical'] > scores['ai']:
-                    applications.append(article)
-                else:
-                    research.append(article)
-            except Exception as e:
-                print(f"Error categorizing article: {str(e)}")
-                print(f"Article data: {article}")
-
+        # Sort articles by relevance score
+        rad_articles.sort(key=lambda x: x['relevance_scores']['combined'], reverse=True)
+        healthcare_articles.sort(key=lambda x: x['relevance_scores']['combined'], reverse=True)
+        
+        print(f"Found {len(rad_articles)} radiology AI articles")
+        print(f"Found {len(healthcare_articles)} healthcare AI articles")
+        
         return {
-            'applications': applications[:5],  # Top 5 application articles
-            'research': research[:5]  # Top 5 research articles
+            'radiology': rad_articles[:5],    # Top 5 radiology AI articles
+            'healthcare': healthcare_articles[:5]  # Top 5 general healthcare AI articles
         }
