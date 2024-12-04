@@ -16,7 +16,6 @@ An automated bot that aggregates and posts weekly updates about AI applications 
 1. Clone the repository
 2. Create a `.env` file with the following variables:
    ```
-   NEWS_API_KEY=your_news_api_key
    LINKEDIN_USERNAME=your_linkedin_username
    LINKEDIN_PASSWORD=your_linkedin_password
    ```
@@ -25,6 +24,15 @@ An automated bot that aggregates and posts weekly updates about AI applications 
    pip install -r requirements.txt
    ```
 4. Configure GitHub Actions secrets with the same environment variables
+
+## Testing
+
+1. Go to the "Actions" tab in your GitHub repository
+2. Select "Test Radiology AI News Bot" workflow
+3. Click "Run workflow"
+4. Options:
+   - Enable debug logging: Shows detailed information about gathered articles
+   - Skip LinkedIn posting: Test everything except actual posting
 
 ## Usage
 
