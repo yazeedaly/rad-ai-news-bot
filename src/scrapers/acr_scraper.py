@@ -7,170 +7,98 @@ class ACRScraper(BaseScraper):
     def __init__(self):
         super().__init__(rate_limit=2)
         self.base_url = 'https://www.acr.org'
-        self.news_url = 'https://www.acr.org/News'
-        self.ai_lab_url = 'https://www.acr.org/Research/ACR-AI-LAB'
-        self.advocacy_url = 'https://www.acr.org/Advocacy/AI-Central'
+        self.news_endpoints = [
+            '/Media-Center/ACR-News-Releases',
+            '/Practice-Management-Quality-Informatics/Artificial-Intelligence',
+            '/Clinical-Resources/Informatics',
+            '/Research/AI-LAB/News'
+        ]
         print(f"Initialized {self.__class__.__name__}")
 
     async def get_articles(self):
         """Fetch articles from ACR website"""
         print(f"{self.__class__.__name__}: Starting article fetch...")
-        articles = []
+        all_articles = []
 
-        try:
-            # Fetch general news
-            news_articles = await self._fetch_news_articles()
-            articles.extend(news_articles)
+        for endpoint in self.news_endpoints:
+            try:
+                url = f"{self.base_url}{endpoint}"
+                content = await self._make_request(url)
+                soup = BeautifulSoup(content, 'html.parser')
 
-            # Fetch AI Lab updates
-            ai_lab_articles = await self._fetch_ai_lab_content()
-            articles.extend(ai_lab_articles)
+                # Find content area
+                content_area = soup.find('div', class_=['content', 'main-content', 'news-listing'])
+                if not content_area:
+                    continue
 
-            # Fetch AI advocacy updates
-            advocacy_articles = await self._fetch_advocacy_content()
-            articles.extend(advocacy_articles)
+                # Look for articles/news items in different formats
+                articles = content_area.find_all(['article', 'div'], class_=[
+                    'news-item', 'list-item', 'content-item', 'media-item'
+                ])
 
-            print(f"{self.__class__.__name__}: Found total of {len(articles)} articles")
-            
-            # Sort by date and return most recent
-            articles.sort(key=lambda x: x.get('published_date', ''), reverse=True)
-            return articles[:5]
+                for article in articles:
+                    try:
+                        # Find title and link
+                        title_elem = article.find(['h2', 'h3', 'h4', 'a'], class_=['title', 'heading'])
+                        if not title_elem:
+                            continue
 
-        except Exception as e:
-            print(f"{self.__class__.__name__}: Error fetching articles - {str(e)}")
-            return []
+                        title = title_elem.get_text(strip=True)
+                        
+                        # Get link
+                        link = None
+                        if title_elem.name == 'a':
+                            link = title_elem['href']
+                        else:
+                            link_elem = title_elem.find('a')
+                            if link_elem:
+                                link = link_elem['href']
 
-    async def _fetch_news_articles(self):
-        """Fetch articles from ACR news section"""
-        articles = []
-        try:
-            content = await self._make_request(self.news_url)
-            soup = BeautifulSoup(content, 'html.parser')
+                        if not link:
+                            continue
 
-            # Find all news items
-            news_items = soup.find_all('div', class_='news-item')
-            for item in news_items:
-                try:
-                    # Check if AI/ML related
-                    text = item.get_text().lower()
-                    if any(keyword in text for keyword in ['artificial intelligence', 'ai', 'machine learning', 'deep learning', 'algorithm']):
-                        title_elem = item.find('h2') or item.find('h3')
-                        link_elem = item.find('a')
-                        date_elem = item.find('span', class_='date')
+                        # Make link absolute
+                        if not link.startswith('http'):
+                            link = f"{self.base_url}{link}"
 
-                        if title_elem and link_elem:
-                            url = link_elem.get('href')
-                            if not url.startswith('http'):
-                                url = self.base_url + url
+                        # Check if AI-related
+                        if self._is_ai_related(title):
+                            # Get date if available
+                            date_elem = article.find(['time', 'span'], class_=['date', 'timestamp'])
+                            pub_date = date_elem.get_text(strip=True) if date_elem else None
 
-                            articles.append({
-                                'title': title_elem.get_text(strip=True),
-                                'url': url,
-                                'published_date': self._parse_date(date_elem.get_text(strip=True)) if date_elem else None,
-                                'summary': self._extract_summary(item),
+                            # Get summary/description
+                            summary_elem = article.find(['p', 'div'], class_=['summary', 'description', 'excerpt'])
+                            summary = summary_elem.get_text(strip=True) if summary_elem else ''
+
+                            all_articles.append({
+                                'title': title,
+                                'url': link,
+                                'published_date': pub_date,
+                                'summary': summary,
                                 'source': 'ACR News'
                             })
 
-                except Exception as e:
-                    print(f"Error processing news item: {str(e)}")
-                    continue
+                    except Exception as e:
+                        print(f"Error processing ACR article: {str(e)}")
+                        continue
 
-        except Exception as e:
-            print(f"Error fetching news articles: {str(e)}")
+            except Exception as e:
+                print(f"Error fetching ACR endpoint {endpoint}: {str(e)}")
+                continue
 
-        return articles
+        print(f"{self.__class__.__name__}: Found {len(all_articles)} articles")
+        return all_articles[:5]
 
-    async def _fetch_ai_lab_content(self):
-        """Fetch content from ACR AI-LAB section"""
-        articles = []
-        try:
-            content = await self._make_request(self.ai_lab_url)
-            soup = BeautifulSoup(content, 'html.parser')
-
-            # Find AI-LAB updates and announcements
-            updates = soup.find_all(['div', 'section'], class_=['update', 'announcement'])
-            for update in updates:
-                try:
-                    title_elem = update.find(['h2', 'h3', 'h4'])
-                    if title_elem:
-                        articles.append({
-                            'title': title_elem.get_text(strip=True),
-                            'url': self.ai_lab_url,
-                            'summary': self._extract_summary(update),
-                            'source': 'ACR AI-LAB'
-                        })
-
-                except Exception as e:
-                    print(f"Error processing AI-LAB update: {str(e)}")
-                    continue
-
-        except Exception as e:
-            print(f"Error fetching AI-LAB content: {str(e)}")
-
-        return articles
-
-    async def _fetch_advocacy_content(self):
-        """Fetch content from ACR AI Central advocacy section"""
-        articles = []
-        try:
-            content = await self._make_request(self.advocacy_url)
-            soup = BeautifulSoup(content, 'html.parser')
-
-            # Find advocacy updates
-            updates = soup.find_all(['div', 'article'], class_=['policy-update', 'advocacy-item'])
-            for update in updates:
-                try:
-                    title_elem = update.find(['h2', 'h3', 'h4'])
-                    if title_elem:
-                        articles.append({
-                            'title': title_elem.get_text(strip=True),
-                            'url': self.advocacy_url,
-                            'summary': self._extract_summary(update),
-                            'source': 'ACR AI Central'
-                        })
-
-                except Exception as e:
-                    print(f"Error processing advocacy update: {str(e)}")
-                    continue
-
-        except Exception as e:
-            print(f"Error fetching advocacy content: {str(e)}")
-
-        return articles
-
-    def _extract_summary(self, element):
-        """Extract a summary from the element"""
-        # Try to find a dedicated summary/description element
-        summary_elem = element.find(['p', 'div'], class_=['summary', 'description', 'excerpt'])
-        if summary_elem:
-            return summary_elem.get_text(strip=True)
-
-        # Otherwise, use the first paragraph
-        first_p = element.find('p')
-        if first_p:
-            return first_p.get_text(strip=True)
-
-        return ''
-
-    def _parse_date(self, date_str):
-        """Parse date string into standard format"""
-        try:
-            # Handle various ACR date formats
-            date_formats = [
-                '%B %d, %Y',
-                '%m/%d/%Y',
-                '%Y-%m-%d'
-            ]
-            
-            for fmt in date_formats:
-                try:
-                    return datetime.strptime(date_str.strip(), fmt).strftime('%Y-%m-%d')
-                except:
-                    continue
-
-            return None
-        except:
-            return None
+    def _is_ai_related(self, text):
+        """Check if content is AI-related"""
+        ai_terms = [
+            'artificial intelligence', 'ai', 'machine learning', 'deep learning',
+            'neural network', 'algorithm', 'automation', 'computer-aided',
+            'ai lab', 'data science'
+        ]
+        text = text.lower()
+        return any(term in text for term in ai_terms)
 
     async def extract_content(self, url):
         """Extract content from an ACR article"""
@@ -183,11 +111,28 @@ class ACRScraper(BaseScraper):
             if not article:
                 return None
 
-            # Extract text content
+            # Get main content
             text = article.get_text(strip=True)
 
-            # Extract key takeaways
-            takeaways = self._extract_takeaways(article)
+            # Extract key points
+            takeaways = []
+
+            # Look for highlighted sections
+            highlights = article.find_all(['h2', 'h3', 'strong', 'b'])
+            for highlight in highlights:
+                point = highlight.get_text(strip=True)
+                if len(point) > 20 and len(point) < 200:
+                    takeaways.append(point)
+                    if len(takeaways) == 3:
+                        break
+
+            # If no highlights found, use first few paragraphs
+            if not takeaways:
+                paragraphs = article.find_all('p')
+                for p in paragraphs[:3]:
+                    text = p.get_text(strip=True)
+                    if len(text) > 20:
+                        takeaways.append(text)
 
             return {
                 'text': text,
@@ -197,33 +142,3 @@ class ACRScraper(BaseScraper):
         except Exception as e:
             print(f"Error extracting content from {url}: {str(e)}")
             return None
-
-    def _extract_takeaways(self, article):
-        """Extract key takeaways from article"""
-        takeaways = []
-
-        # Look for key points in various formats
-        key_elements = article.find_all(['h2', 'h3', 'strong', 'b', 
-                                       'div', 'p'], class_=['key-point', 'highlight'])
-
-        # Also look for bullet points
-        bullet_points = article.find_all('li')
-
-        # Process key elements
-        for elem in key_elements:
-            text = elem.get_text(strip=True)
-            if len(text) > 20 and len(text) < 200:
-                takeaways.append(text)
-                if len(takeaways) == 3:
-                    break
-
-        # If we don't have enough takeaways, check bullet points
-        if len(takeaways) < 3:
-            for point in bullet_points:
-                text = point.get_text(strip=True)
-                if len(text) > 20 and len(text) < 200:
-                    takeaways.append(text)
-                    if len(takeaways) == 3:
-                        break
-
-        return takeaways
