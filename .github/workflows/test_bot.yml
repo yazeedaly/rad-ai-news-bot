@@ -34,6 +34,9 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
     
+    - name: List directory structure
+      run: ls -R
+      
     - name: Create images directory
       run: mkdir -p images
     
@@ -43,4 +46,9 @@ jobs:
         LINKEDIN_PASSWORD: ${{ secrets.LINKEDIN_PASSWORD }}
         DEBUG_MODE: ${{ github.event.inputs.debug_mode }}
         SKIP_POSTING: ${{ github.event.inputs.skip_posting }}
-      run: python src/test_bot.py
+        PYTHONPATH: ${{ github.workspace }}
+      run: |
+        echo "Current directory: $(pwd)"
+        echo "Python path: $PYTHONPATH"
+        echo "Python version: $(python --version)"
+        python src/test_bot.py
