@@ -13,18 +13,30 @@ class ContentFilter:
         
         self.healthcare_keywords = [
             'healthcare', 'medical', 'clinical', 'hospital', 'physician',
-            'patient', 'diagnosis', 'treatment', 'care', 'health', 'provider',
+            'patient', 'diagnosis', 'treatment', 'care', 'health system',
             'ehr', 'emr', 'digital health', 'telemedicine', 'medical records',
-            'health system', 'medical practice', 'clinician', 'doctor',
-            'medical device', 'fda', 'health tech', 'medicine'
+            'health system', 'medical practice', 'clinician', 'health data',
+            'medical device', 'fda', 'health tech', 'digital medicine'
         ]
         
         self.ai_keywords = [
-            'artificial intelligence', 'ai', 'machine learning', 'deep learning',
-            'neural network', 'algorithm', 'automation', 'ml', 'nlp',
+            'artificial intelligence', 'machine learning', 'deep learning',
+            'neural network', 'algorithm', 'ai-powered', 'ml', 'nlp',
             'predictive analytics', 'computer vision', 'decision support',
             'automated detection', 'ai model', 'ai system', 'ai technology',
             'ai solution', 'ai software', 'ai tool', 'ai platform'
+        ]
+
+        # Must have one of these exact phrases for healthcare AI articles
+        self.required_ai_phrases = [
+            'artificial intelligence',
+            'machine learning',
+            'ai-powered',
+            'ai system',
+            'ai technology',
+            'deep learning',
+            'neural network',
+            'ai model'
         ]
 
     def calculate_relevance_score(self, text: str) -> Dict[str, float]:
@@ -36,28 +48,16 @@ class ContentFilter:
         healthcare_score = self._calculate_keyword_score(text, self.healthcare_keywords)
         ai_score = self._calculate_keyword_score(text, self.ai_keywords)
         
-        # Check for compound terms that should boost scores
-        compound_boosts = [
-            ('ai', 'imaging'),
-            ('artificial intelligence', 'imaging'),
-            ('machine learning', 'diagnosis'),
-            ('algorithm', 'detection'),
-            ('ai', 'radiology'),
-            ('ai', 'healthcare')
-        ]
-        
-        for term1, term2 in compound_boosts:
-            if term1 in text and term2 in text:
-                if term2 in self.rad_keywords:
-                    rad_score *= 1.2
-                if term2 in self.healthcare_keywords:
-                    healthcare_score *= 1.2
-                ai_score *= 1.2
+        # Check for required AI phrases for healthcare articles
+        has_required_ai = any(phrase in text for phrase in self.required_ai_phrases)
+        if not has_required_ai:
+            ai_score *= 0.5  # Significantly reduce AI score if no required phrases found
         
         scores = {
             'radiology': min(rad_score, 1.0),
             'healthcare': min(healthcare_score, 1.0),
-            'ai': min(ai_score, 1.0)
+            'ai': min(ai_score, 1.0),
+            'has_required_ai': has_required_ai
         }
         
         # Calculate combined score
@@ -78,34 +78,28 @@ class ContentFilter:
         for keyword in keywords:
             # Count both exact matches and matches within words
             exact_matches = len(re.findall(r'\b' + re.escape(keyword) + r'\b', text))
-            partial_matches = len(re.findall(re.escape(keyword), text)) - exact_matches
-            
             if exact_matches > 0:
                 unique_matches.add(keyword)
                 total_matches += exact_matches
-            if partial_matches > 0:
-                unique_matches.add(keyword)
-                total_matches += partial_matches * 0.5  # Partial matches count less
         
         # Calculate scores
         frequency_score = min(total_matches / 2, 1.0)
         variety_score = len(unique_matches) / (len(keywords) * 0.2)  # Only need 20% of keywords
         
-        # Combine scores with more weight on variety
         return min((frequency_score * 0.3 + variety_score * 0.7), 1.0)
 
     def is_relevant(self, text: str) -> Dict[str, bool]:
-        """Determine article relevance with more lenient thresholds"""
+        """Determine article relevance with stricter AI requirements"""
+        text = text.lower()
         scores = self.calculate_relevance_score(text)
         
-        # Lower thresholds and more flexible conditions
-        is_rad_ai = (scores['radiology'] > 0.15 and scores['ai'] > 0.15) or \
-                    (scores['radiology'] > 0.3) or \
-                    (scores['ai'] > 0.3 and 'radiology' in text.lower())
-                    
-        is_healthcare_ai = (scores['healthcare'] > 0.15 and scores['ai'] > 0.15) or \
-                          (scores['healthcare'] > 0.3 and 'ai' in text.lower()) or \
-                          (scores['ai'] > 0.3 and any(term in text.lower() for term in ['health', 'medical', 'clinical']))
+        # For healthcare articles, must have a required AI phrase
+        is_healthcare_ai = scores['healthcare'] > 0.15 and scores['ai'] > 0.15 and scores['has_required_ai']
+        
+        # Radiology articles can be slightly more lenient but still need good AI relevance
+        is_rad_ai = (scores['radiology'] > 0.15 and scores['ai'] > 0.15 and 
+                    (scores['has_required_ai'] or 
+                     any(term in text for term in ['ai', 'algorithm', 'automated', 'computer-aided'])))
         
         return {
             'is_relevant': is_rad_ai or is_healthcare_ai,
