@@ -5,6 +5,7 @@ from ..scrapers.auntminnie_scraper import AuntMinnieScraper
 from ..scrapers.beckers_scraper import BeckersScraper
 from ..scrapers.stat_scraper import StatScraper
 from ..scrapers.modern_healthcare_scraper import ModernHealthcareScraper
+from ..scrapers.healthcare_it_news_scraper import HealthcareITNewsScraper
 from ..filters.content_filter import ContentFilter
 
 class NewsAggregator:
@@ -14,7 +15,8 @@ class NewsAggregator:
             AuntMinnieScraper(),
             BeckersScraper(),
             StatScraper(),
-            ModernHealthcareScraper()
+            ModernHealthcareScraper(),
+            HealthcareITNewsScraper()
         ]
         self.content_filter = ContentFilter()
         print(f"Initialized {len(self.scrapers)} scrapers")
@@ -24,30 +26,45 @@ class NewsAggregator:
         print("Starting news gathering process...")
         all_articles = []
         
-        # Gather articles from all sources
-        for scraper in self.scrapers:
-            try:
-                print(f"Fetching articles from {scraper.__class__.__name__}...")
-                articles = await scraper.get_articles()
-                
-                for article in articles:
-                    article['source'] = scraper.__class__.__name__.replace('Scraper', '')
-                all_articles.extend(articles)
-                
-                print(f"Found {len(articles)} articles from {scraper.__class__.__name__}")
-            except Exception as e:
-                print(f'Error gathering news from {scraper.__class__.__name__}: {str(e)}')
-                import traceback
-                print(traceback.format_exc())
+        # Gather articles from all sources concurrently
+        tasks = [self._gather_from_scraper(scraper) for scraper in self.scrapers]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Process results
+        for result in results:
+            if isinstance(result, list):
+                all_articles.extend(result)
+            elif isinstance(result, Exception):
+                print(f"Error during gathering: {str(result)}")
 
         print(f"Total articles gathered: {len(all_articles)}")
         return self._process_articles(all_articles)
+
+    async def _gather_from_scraper(self, scraper) -> List[Dict]:
+        """Gather articles from a single scraper with error handling"""
+        try:
+            print(f"Fetching articles from {scraper.__class__.__name__}...")
+            articles = await scraper.get_articles()
+            
+            # Add source information to each article
+            for article in articles:
+                article['source'] = scraper.__class__.__name__.replace('Scraper', '')
+            
+            print(f"Found {len(articles)} articles from {scraper.__class__.__name__}")
+            return articles
+            
+        except Exception as e:
+            print(f'Error gathering news from {scraper.__class__.__name__}: {str(e)}')
+            import traceback
+            print(traceback.format_exc())
+            return []
 
     def _process_articles(self, articles: List[Dict]) -> Dict[str, List[Dict]]:
         """Process and categorize articles"""
         rad_articles = []
         healthcare_articles = []
         
+        print(f"Processing {len(articles)} articles...")
         for article in articles:
             try:
                 text = f"{article['title']} {article.get('summary', '')}"
