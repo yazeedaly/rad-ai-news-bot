@@ -4,6 +4,7 @@ import asyncio
 from ..scrapers.auntminnie_scraper import AuntMinnieScraper
 from ..scrapers.beckers_scraper import BeckersScraper
 from ..scrapers.stat_scraper import StatScraper
+from ..scrapers.modern_healthcare_scraper import ModernHealthcareScraper
 from ..filters.content_filter import ContentFilter
 
 class NewsAggregator:
@@ -12,7 +13,8 @@ class NewsAggregator:
         self.scrapers = [
             AuntMinnieScraper(),
             BeckersScraper(),
-            StatScraper()
+            StatScraper(),
+            ModernHealthcareScraper()
         ]
         self.content_filter = ContentFilter()
         print(f"Initialized {len(self.scrapers)} scrapers")
@@ -35,17 +37,11 @@ class NewsAggregator:
                 print(f"Found {len(articles)} articles from {scraper.__class__.__name__}")
             except Exception as e:
                 print(f'Error gathering news from {scraper.__class__.__name__}: {str(e)}')
+                import traceback
+                print(traceback.format_exc())
 
         print(f"Total articles gathered: {len(all_articles)}")
-
-        # Process and categorize articles
-        categorized_articles = self._process_articles(all_articles)
-        
-        # Ensure both categories exist in the output
-        return {
-            'radiology': categorized_articles.get('radiology', []),
-            'healthcare': categorized_articles.get('healthcare', [])
-        }
+        return self._process_articles(all_articles)
 
     def _process_articles(self, articles: List[Dict]) -> Dict[str, List[Dict]]:
         """Process and categorize articles"""
@@ -67,6 +63,7 @@ class NewsAggregator:
                         
             except Exception as e:
                 print(f"Error processing article: {str(e)}")
+                print(f"Problematic article: {article}")
         
         # Sort articles by relevance score
         rad_articles.sort(key=lambda x: x['relevance_scores']['combined'], reverse=True)

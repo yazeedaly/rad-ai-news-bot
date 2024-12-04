@@ -44,6 +44,8 @@ jobs:
       env:
         LINKEDIN_USERNAME: ${{ secrets.LINKEDIN_USERNAME }}
         LINKEDIN_PASSWORD: ${{ secrets.LINKEDIN_PASSWORD }}
+        MODERN_HEALTHCARE_USERNAME: ${{ secrets.MODERN_HEALTHCARE_USERNAME }}
+        MODERN_HEALTHCARE_PASSWORD: ${{ secrets.MODERN_HEALTHCARE_PASSWORD }}
         DEBUG_MODE: ${{ github.event.inputs.debug_mode }}
         SKIP_POSTING: ${{ github.event.inputs.skip_posting }}
         PYTHONPATH: ${{ github.workspace }}
@@ -51,4 +53,10 @@ jobs:
         echo "Current directory: $(pwd)"
         echo "Python path: $PYTHONPATH"
         echo "Python version: $(python --version)"
+        echo "Testing Modern Healthcare credentials..."
+        if [ -n "$MODERN_HEALTHCARE_USERNAME" ] && [ -n "$MODERN_HEALTHCARE_PASSWORD" ]; then
+          echo "Modern Healthcare credentials are set"
+        else
+          echo "Warning: Modern Healthcare credentials are not set"
+        fi
         python src/test_bot.py
